@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تنزيل يوتيوب</title>
+<style>
+  body{font-family:sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:20px;display:flex;justify-content:center}
+  .card{width:100%;max-width:480px;background:#1c1c1c;border-radius:16px;padding:24px;box-shadow:0 4px 20px #0008}
+  h1{font-size:22px;text-align:center;margin-top:0}
+  input,select,button{width:100%;box-sizing:border-box;padding:14px;border-radius:10px;border:1px solid #333;background:#111;color:#eee;font-size:16px;margin-top:10px}
+  button{background:#e62117;border:none;font-weight:bold;cursor:pointer}
+  button:disabled{opacity:.5}
+  .bar{height:12px;background:#333;border-radius:8px;overflow:hidden;margin-top:16px}
+  .fill{height:100%;width:0;background:#2ecc71;transition:width .3s}
+  #msg{margin-top:12px;text-align:center;min-height:22px;font-size:15px}
+  .err{color:#ff6b6b}.ok{color:#2ecc71}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>⬇️ تنزيل فيديوهات يوتيوب</h1>
+  <input id="url" type="url" placeholder="الصق رابط الفيديو هنا" dir="ltr">
+  <select id="quality">
+    <option value="best">أفضل جودة</option>
+    <option value="1080">1080p</option>
+    <option value="720" selected>720p</option>
+    <option value="480">480p</option>
+    <option value="audio">صوت فقط (MP3)</option>
+    <option value="audio_hq">موسيقى أعلى جودة (MP3 320)</option>
+  </select>
+  <button id="btn" onclick="start()">تنزيل</button>
+  <div class="bar"><div class="fill" id="fill"></div></div>
+  <div id="msg"></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+
+function show(text, cls) {
+  const m = $('msg');
+  m.textContent = text;
+  m.className = cls || '';
+}
+
+async function start() {
+  const url = $('url').value.trim();
+  if (!url) { show('الرجاء لصق الرابط', 'err'); return; }
+  $('btn').disabled = true;
+  $('fill').style.width = '0%';
+  show('جاري التحضير...');
+  try {
+    const r = await fetch('/api/download', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, quality: $('quality').value})
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    poll(d.id);
+  } catch (e) {
+    show(e.message, 'err');
+    $('btn').disabled = false;
+  }
+}
+
+function poll(id) {
+  const t = setInterval(async () => {
+    try {
+      const j = await (await fetch('/api/status/' + id)).json();
+      if (j.status === 'running') {
+        $('fill').style.width = j.percent + '%';
+        show(`⏬ ${j.percent}%  ${j.speed}  متبقي ${j.eta}`);
+      } else if (j.status === 'processing') {
+        $('fill').style.width = '100%';
+        show('⚙️ جاري الدمج والمعالجة...');
+      } else if (j.status === 'done') {
+        clearInterval(t);
+        $('fill').style.width = '100%';
+        show('✅ تم التنزيل: ' + j.title, 'ok');
+        $('btn').disabled = false;
+      } else {
+        clearInterval(t);
+        show('❌ ' + (j.error || 'صار خطأ'), 'err');
+        $('btn').disabled = false;
+      }
+    } catch (e) {
+      clearInterval(t);
+      show('انقطع الاتصال بالسيرفر', 'err');
+      $('btn').disabled = false;
+    }
+  }, 800);
+}
+</script>
+</body>
+</html>

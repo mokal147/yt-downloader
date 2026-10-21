@@ -17,6 +17,7 @@ FORMATS = {
     "720": "bv*[height<=720]+ba/b[height<=720]",
     "480": "bv*[height<=480]+ba/b[height<=480]",
     "audio": "ba/b",
+    "audio_hq": "bestaudio/best",
 }
 
 
@@ -53,6 +54,13 @@ def run_job(job_id, url, quality):
             "preferredcodec": "mp3",
             "preferredquality": "192",
         }]
+    if quality == "audio_hq":
+        opts["writethumbnail"] = True
+        opts["postprocessors"] = [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "320"},
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
+        ]
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)

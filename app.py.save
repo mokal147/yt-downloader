@@ -1,0 +1,96 @@
+import os
+import uuid
+import threading
+from flask import Flask, request, jsonify, render_template
+import yt_dlp
+
+app = Flask(__name__)
+
+DOWNLOAD_DIR = os.environ.get("YT_DIR", os.path.expanduser("~/storage/downloads/YouTube"))
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+jobs = {}
+
+FORMATS = {
+    "best": "bv*+ba/b",
+    "1080": "bv*[height<=1080]+ba/b[height<=1080]",
+    "720": "bv*[height<=720]+ba/b[height<=720]",
+    "480": "bv*[height<=480]+ba/b[height<=480]",
+    "audio": "ba/b",
+}
+
+
+def make_hook(job_id):
+    def hook(d):
+        job = jobs[job_id]
+        if d["status"] == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            done = d.get("downloaded_bytes", 0)
+            job["status"] = "running"
+            job["percent"] = round(done * 100 / total, 1) if total else 0
+            job["speed"] = d.get("_speed_str", "").strip()
+            job["eta"] = d.get("_eta_str", "").strip()
+        elif d["status"] == "finished":
+            job["status"] = "processing"
+    return hook
+
+
+def run_job(job_id, url, quality):
+    job = jobs[job_id]
+    opts = {
+        "format": FORMATS.get(quality, FORMATS["best"]),
+        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s [%(id)s].%(ext)s"),
+        "merge_output_format": "mp4",
+        "concurrent_fragment_downloads": 8,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "progress_hooks": [make_hook(job_id)],
+    }
+    if quality == "audio":
+        opts["postprocessors"] = [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }]
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+        job.update(status="done", percent=100, title=info.get("title", ""))
+    except Exception as e:
+        job.update(status="error", error=str(e)[:300])
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.post("/api/download")
+def start_download():
+    data = request.get_json(force=True)
+    url = (data.get("url") or "").strip()
+    quality = data.get("quality", "best")
+
+    if "youtube.com" not in url and "youtu.be" not in url:
+        return jsonify(error="الرابط لازم يكون من يوتيوب"), 400
+
+    job_id = uuid.uuid4().hex[:10]
+    jobs[job_id] = {"status": "running", "percent": 0, "speed": "", "eta": "", "title": ""}
+    threading.Thread(target=run_job, args=(job_id, url, quality), daemon=True).start()
+    return jsonify(id=job_id)
+
+
+@app.get("/api/status/<job_id>")
+def status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify(error="العملية غير موجودة"), 404
+    return jsonify(job)
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=8000)
+
+nano templates/index.html
+
